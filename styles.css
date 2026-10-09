@@ -1,0 +1,120 @@
+    /* Custom iOS styling */
+    body {
+      -webkit-tap-highlight-color: transparent;
+      background-color: #0B0F19;
+      color: #F8FAFC;
+    }
+
+    body[data-accent="blue"] { --accent-strong: #2563eb; --accent-hover: #3b82f6; --accent-soft: #60a5fa; --accent-border: #3b82f6; }
+    body[data-accent="violet"] { --accent-strong: #7c3aed; --accent-hover: #8b5cf6; --accent-soft: #a78bfa; --accent-border: #8b5cf6; }
+    body[data-accent="emerald"] { --accent-strong: #059669; --accent-hover: #10b981; --accent-soft: #34d399; --accent-border: #10b981; }
+    body[data-accent="rose"] { --accent-strong: #e11d48; --accent-hover: #f43f5e; --accent-soft: #fb7185; --accent-border: #f43f5e; }
+
+    body[data-accent] .bg-blue-600 { background-color: var(--accent-strong); }
+    body[data-accent] .hover\:bg-blue-500:hover { background-color: var(--accent-hover); }
+    body[data-accent] .text-blue-400,
+    body[data-accent] .text-blue-500 { color: var(--accent-soft); }
+    body[data-accent] .border-blue-500 { border-color: var(--accent-border); }
+    body[data-accent] .bg-blue-500\/10 { background-color: color-mix(in srgb, var(--accent-hover) 10%, transparent); }
+    body[data-accent] .bg-blue-500\/20 { background-color: color-mix(in srgb, var(--accent-hover) 20%, transparent); }
+    body[data-accent] .bg-blue-600\/20 { background-color: color-mix(in srgb, var(--accent-strong) 20%, transparent); }
+    body[data-accent] .hover\:bg-blue-600\/30:hover { background-color: color-mix(in srgb, var(--accent-strong) 30%, transparent); }
+    body[data-accent] .border-blue-500\/30 { border-color: color-mix(in srgb, var(--accent-border) 30%, transparent); }
+    body[data-accent] .focus\:border-blue-500:focus { border-color: var(--accent-border); }
+
+    .accent-swatch {
+      width: 2rem;
+      height: 2rem;
+      border-radius: 9999px;
+      background: var(--swatch);
+      border: 2px solid transparent;
+      box-shadow: inset 0 0 0 2px #0f172a;
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+    .accent-swatch:hover { transform: scale(1.08); }
+    .accent-swatch[aria-pressed="true"] { box-shadow: 0 0 0 2px #f8fafc, inset 0 0 0 2px #0f172a; }
+
+    :focus-visible {
+      outline: 3px solid #60A5FA;
+      outline-offset: 3px;
+    }
+
+    .skip-link {
+      position: fixed;
+      top: 0.75rem;
+      left: 0.75rem;
+      z-index: 100;
+      padding: 0.75rem 1rem;
+      color: #0B0F19;
+      background: #BFDBFE;
+      border-radius: 0.75rem;
+      transform: translateY(-160%);
+      transition: transform 0.15s ease;
+    }
+
+    .skip-link:focus {
+      transform: translateY(0);
+    }
+
+    .glass-card {
+      background: rgba(30, 41, 59, 0.75);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .glass-nav {
+      background: rgba(15, 23, 42, 0.85);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border-top: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .no-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+    .no-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+
+    .donut-segment {
+      transition: stroke-dasharray 0.5s ease, stroke 0.3s ease;
+    }
+
+    .pb-safe {
+      padding-bottom: calc(env(safe-area-inset-bottom, 20px) + 4rem);
+    }
+    .pb-nav-safe {
+      padding-bottom: env(safe-area-inset-bottom, 12px);
+    }
+    .pt-safe {
+      padding-top: max(env(safe-area-inset-top, 12px), 1rem);
+    }
+
+    #app-toast {
+      position: fixed;
+      top: calc(env(safe-area-inset-top, 12px) + 8px);
+      left: 50%;
+      width: calc(100% - 2rem);
+      max-width: 26rem;
+      transform: translate(-50%, -140%);
+      opacity: 0;
+      pointer-events: none;
+      transition: transform 0.35s ease, opacity 0.35s ease;
+      z-index: 60;
+    }
+    #app-toast.toast-visible {
+      transform: translate(-50%, 0);
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        scroll-behavior: auto !important;
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+      }
+    }
