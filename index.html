@@ -66,7 +66,7 @@
         <div class="absolute -right-8 -top-8 w-36 h-36 bg-blue-500/10 rounded-full blur-2xl pointer-events-none"></div>
         <div class="flex justify-between items-start">
           <div>
-            <span class="text-xs uppercase tracking-wider text-indigo-300/80 font-semibold">Общий Баланс</span>
+            <span class="text-xs uppercase tracking-wider text-indigo-300/80 font-semibold">Все счета</span>
             <div class="text-3xl font-extrabold tracking-tight mt-1 text-white" id="dash-total-balance">0 ₽</div>
           </div>
           <span class="px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center space-x-1">
@@ -98,6 +98,8 @@
         </div>
       </div>
 
+      <div id="home-account-cards" class="grid grid-cols-2 gap-2.5" aria-label="Мои счета"></div>
+
       <!-- Upcoming Subscriptions Alert Widget -->
       <div id="dash-sub-alert" role="button" tabindex="0" aria-label="Открыть список подписок" onclick="switchTab('subscriptions')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchTab('subscriptions')}" class="glass-card rounded-2xl p-4 flex items-center justify-between border border-amber-500/30 bg-amber-500/5 cursor-pointer hover:bg-amber-500/10 transition">
         <div class="flex items-center space-x-3">
@@ -120,10 +122,10 @@
           </div>
           <div>
             <div class="flex items-center space-x-1.5">
-              <span class="text-xs font-semibold text-slate-400">Безопасный лимит в день</span>
+              <span class="text-xs font-semibold text-slate-400">Можно тратить до зарплаты</span>
               <span class="text-[10px] bg-slate-800 text-slate-300 px-1.5 py-0.5 rounded font-mono" id="dash-days-left">0 дн.</span>
             </div>
-            <p class="text-lg font-bold text-white mt-0.5" id="dash-safe-daily">0 ₽ / день</p>
+            <p class="text-lg font-bold text-white mt-0.5" id="dash-payday-limit">0 ₽ / день</p>
           </div>
         </div>
         <div class="text-right">
@@ -133,7 +135,7 @@
       </div>
 
       <!-- Quick Actions Grid -->
-      <div class="grid grid-cols-2 gap-3">
+      <div class="grid grid-cols-3 gap-2">
         <button onclick="openModal('modal-add-tx', 'expense')" class="glass-card hover:bg-slate-800/80 p-3.5 rounded-2xl flex items-center space-x-3 transition active:scale-98">
           <div class="w-9 h-9 rounded-xl bg-rose-500/20 text-rose-400 flex items-center justify-center">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4"/></svg>
@@ -153,7 +155,13 @@
             <p class="text-[10px] text-slate-400">Зарплата, фриланс</p>
           </div>
         </button>
+        <button onclick="openModal('modal-add-tx', 'transfer')" class="glass-card hover:bg-slate-800/80 p-3 rounded-2xl flex flex-col items-center justify-center text-center gap-2 transition active:scale-98">
+          <div class="w-9 h-9 rounded-xl bg-sky-500/20 text-sky-300 flex items-center justify-center"><span class="text-xl">⇄</span></div>
+          <span class="text-xs font-bold text-white">Перевод</span>
+        </button>
       </div>
+
+      <div id="home-goal-card"></div>
 
       <!-- Recent Transactions Section -->
       <div class="space-y-3">
@@ -182,18 +190,56 @@
           <button onclick="setTxFilter('all')" id="btn-filter-all" class="filter-pill px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-blue-600 text-white transition whitespace-nowrap">Все</button>
           <button onclick="setTxFilter('expense')" id="btn-filter-expense" class="filter-pill px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-slate-800 text-slate-300 hover:bg-slate-700 transition whitespace-nowrap">Расходы</button>
           <button onclick="setTxFilter('income')" id="btn-filter-income" class="filter-pill px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-slate-800 text-slate-300 hover:bg-slate-700 transition whitespace-nowrap">Доходы</button>
+          <button onclick="setTxFilter('transfer')" id="btn-filter-transfer" class="filter-pill px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-slate-800 text-slate-300 hover:bg-slate-700 transition whitespace-nowrap">Переводы</button>
         </div>
       </div>
 
       <div class="flex items-center justify-between px-1">
         <span class="text-xs text-slate-400 font-medium" id="tx-count-label">Показано: 0 записей</span>
-        <select id="tx-category-select" aria-label="Фильтр по категории" onchange="renderTransactionsTab()" class="bg-slate-800 text-xs text-slate-200 border border-slate-700 rounded-xl px-2.5 py-1 focus:outline-none">
-          <option value="ALL">Все категории</option>
-        </select>
+        <div class="flex gap-2">
+          <select id="tx-account-select" aria-label="Фильтр по счёту" onchange="renderTransactionsTab()" class="max-w-36 bg-slate-800 text-xs text-slate-200 border border-slate-700 rounded-xl px-2 py-1 focus:outline-none"><option value="ALL">Все счета</option></select>
+          <select id="tx-category-select" aria-label="Фильтр по категории" onchange="renderTransactionsTab()" class="max-w-36 bg-slate-800 text-xs text-slate-200 border border-slate-700 rounded-xl px-2 py-1 focus:outline-none"><option value="ALL">Все категории</option></select>
+        </div>
       </div>
 
       <div id="tx-grouped-list" class="space-y-4">
         <!-- Dynamic content -->
+      </div>
+    </section>
+
+    <section id="tab-goals" aria-hidden="true" class="tab-content hidden space-y-5">
+      <div class="rounded-3xl p-5 border border-emerald-500/20 bg-gradient-to-br from-emerald-950/70 via-slate-900 to-slate-900">
+        <p class="text-[10px] uppercase tracking-[0.18em] text-emerald-300">Планы и накопления</p>
+        <h2 class="text-xl font-extrabold text-white mt-1">Цели, которые ближе</h2>
+        <p class="text-xs text-slate-400 mt-2">Отмечайте взносы и следите за прогрессом. Взносы распределяют деньги внутри баланса, но сами по себе не меняют счета.</p>
+        <button type="button" onclick="openGoalModal()" class="mt-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 px-4 py-2.5 text-xs font-bold text-slate-950">＋ Новая цель</button>
+      </div>
+      <div id="goals-list" class="space-y-3"></div>
+      <div id="goal-savings-chart" class="glass-card rounded-2xl p-4"></div>
+    </section>
+
+    <section id="tab-profile" aria-hidden="true" class="tab-content hidden space-y-5">
+      <div>
+        <p class="text-[10px] uppercase tracking-[0.18em] text-slate-500">Личное пространство</p>
+        <h2 class="text-xl font-extrabold text-white mt-1">Профиль и счета</h2>
+      </div>
+      <div class="glass-card rounded-3xl p-4 space-y-3">
+        <div class="flex items-center justify-between"><h3 class="text-sm font-bold text-white">Мои счета</h3><button type="button" onclick="openAccountModal()" class="rounded-xl bg-blue-600 px-3 py-2 text-xs font-bold text-white">＋ Добавить</button></div>
+        <div id="profile-accounts" class="space-y-2"></div>
+      </div>
+      <div class="grid grid-cols-2 gap-2.5">
+        <button type="button" onclick="switchTab('subscriptions')" class="profile-action"><span class="profile-action-icon">↻</span><span>Подписки</span><small id="profile-sub-count">0 активных</small></button>
+        <button type="button" onclick="switchTab('forecast')" class="profile-action"><span class="profile-action-icon">◔</span><span>Бюджеты</span><small>Лимиты и прогноз</small></button>
+        <button type="button" onclick="switchTab('debts')" class="profile-action"><span class="profile-action-icon">⇄</span><span>Долги</span><small>Кто кому должен</small></button>
+        <button type="button" onclick="openModal('modal-settings')" class="profile-action"><span class="profile-action-icon">⚙</span><span>Настройки</span><small>Данные и приватность</small></button>
+      </div>
+      <div class="glass-card rounded-2xl p-4 space-y-3">
+        <div class="flex items-center justify-between"><h3 class="text-sm font-bold text-white">Повторяющиеся операции</h3><span class="text-xs text-slate-500" id="recurring-count">0</span></div>
+        <div id="recurring-list" class="space-y-2"></div>
+      </div>
+      <div class="flex gap-2">
+        <button type="button" onclick="toggleBalanceVisibility()" class="flex-1 rounded-xl border border-slate-700 bg-slate-900 py-3 text-xs font-semibold text-slate-200" id="profile-hide-balance">Скрыть балансы</button>
+        <button type="button" onclick="lockAppNow()" class="flex-1 rounded-xl border border-slate-700 bg-slate-900 py-3 text-xs font-semibold text-slate-200">Заблокировать приложение</button>
       </div>
     </section>
 
@@ -273,6 +319,9 @@
 
         <p class="text-xs text-slate-400 mt-2" id="analytics-month-name">Текущий период</p>
       </div>
+
+      <div id="analytics-month-summary" class="grid grid-cols-2 gap-2.5"></div>
+      <div id="analytics-trend" class="glass-card rounded-2xl p-4"></div>
 
       <div class="space-y-3">
         <div class="flex justify-between items-center px-1">
@@ -413,7 +462,7 @@
       </button>
 
       <!-- Tab 3: Subscriptions (NEW) -->
-      <button type="button" onclick="switchTab('subscriptions')" id="nav-btn-subscriptions" aria-controls="tab-subscriptions" class="nav-item flex flex-col items-center py-1 px-2 text-slate-400 hover:text-slate-200 transition">
+      <button type="button" onclick="switchTab('subscriptions')" id="nav-btn-subscriptions" aria-controls="tab-subscriptions" aria-hidden="true" class="nav-item hidden">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
         <span class="text-[10px] font-semibold mt-1">Подписки</span>
       </button>
@@ -425,15 +474,23 @@
       </button>
 
       <!-- Tab 5: Forecast & Budgets -->
-      <button type="button" onclick="switchTab('forecast')" id="nav-btn-forecast" aria-controls="tab-forecast" class="nav-item flex flex-col items-center py-1 px-2 text-slate-400 hover:text-slate-200 transition">
+      <button type="button" onclick="switchTab('forecast')" id="nav-btn-forecast" aria-controls="tab-forecast" aria-hidden="true" class="nav-item hidden">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/></svg>
         <span class="text-[10px] font-semibold mt-1">Прогноз</span>
       </button>
 
       <!-- Tab 6: Debts -->
-      <button type="button" onclick="switchTab('debts')" id="nav-btn-debts" aria-controls="tab-debts" class="nav-item flex flex-col items-center py-1 px-2 text-slate-400 hover:text-slate-200 transition">
+      <button type="button" onclick="switchTab('debts')" id="nav-btn-debts" aria-controls="tab-debts" aria-hidden="true" class="nav-item hidden">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4M16 17H4m0 0l4 4m-4-4l4-4"/></svg>
         <span class="text-[10px] font-semibold mt-1">Долги</span>
+      </button>
+      <button type="button" onclick="switchTab('goals')" id="nav-btn-goals" aria-controls="tab-goals" class="nav-item flex flex-col items-center py-1 px-2 text-slate-400 hover:text-slate-200 transition">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3l2.8 5.7L21 9.6l-4.5 4.4 1.1 6.2L12 17.3l-5.6 2.9 1.1-6.2L3 9.6l6.2-.9L12 3z"/></svg>
+        <span class="text-[10px] font-semibold mt-1">Цели</span>
+      </button>
+      <button type="button" onclick="switchTab('profile')" id="nav-btn-profile" aria-controls="tab-profile" class="nav-item flex flex-col items-center py-1 px-2 text-slate-400 hover:text-slate-200 transition">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2m12-14a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
+        <span class="text-[10px] font-semibold mt-1">Профиль</span>
       </button>
 
     </div>
@@ -453,9 +510,10 @@
       <form id="form-tx" onsubmit="saveTransaction(event)" class="space-y-4">
         <input type="hidden" id="tx-id" value="">
 
-        <div class="grid grid-cols-2 gap-2 bg-slate-950 p-1 rounded-2xl border border-slate-800">
-          <button type="button" onclick="setTxType('expense')" id="tx-type-btn-expense" class="py-2 rounded-xl text-xs font-bold bg-rose-600 text-white transition">Расход</button>
-          <button type="button" onclick="setTxType('income')" id="tx-type-btn-income" class="py-2 rounded-xl text-xs font-bold text-slate-400 hover:text-white transition">Доход</button>
+        <div class="grid grid-cols-3 gap-1 bg-slate-950 p-1 rounded-2xl border border-slate-800" role="group" aria-label="Тип операции">
+          <button type="button" onclick="setTxType('expense')" id="tx-type-btn-expense" aria-pressed="true" class="py-2 rounded-xl text-xs font-bold bg-rose-600 text-white transition">Расход</button>
+          <button type="button" onclick="setTxType('income')" id="tx-type-btn-income" aria-pressed="false" class="py-2 rounded-xl text-xs font-bold text-slate-400 hover:text-white transition">Доход</button>
+          <button type="button" onclick="setTxType('transfer')" id="tx-type-btn-transfer" aria-pressed="false" class="py-2 rounded-xl text-xs font-bold text-slate-400 hover:text-white transition">Перевод</button>
         </div>
 
         <div>
@@ -463,6 +521,14 @@
           <input type="number" id="tx-amount" min="0.01" step="any" required placeholder="0.00"
             class="w-full bg-slate-950 border border-slate-800 rounded-2xl px-4 py-3 text-2xl font-black text-white focus:outline-none focus:border-blue-500">
         </div>
+
+        <div id="tx-transfer-fields" class="hidden grid grid-cols-2 gap-2">
+          <div><label for="tx-account-source" class="text-xs text-slate-400 mb-1 block">Откуда</label><select id="tx-account-source" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-2 py-2.5 text-xs text-white"></select></div>
+          <div><label for="tx-account-target" class="text-xs text-slate-400 mb-1 block">Куда</label><select id="tx-account-target" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-2 py-2.5 text-xs text-white"></select></div>
+        </div>
+
+        <div id="tx-normal-fields" class="space-y-4">
+        <div><label for="tx-account" class="text-xs text-slate-400 font-semibold mb-1 block">Счёт</label><select id="tx-account" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-sm text-white"></select></div>
 
         <div>
           <span id="tx-category-label" class="text-xs text-slate-400 font-semibold mb-2 block">Категория</span>
@@ -472,6 +538,15 @@
             ＋ Создать свою категорию
           </button>
           <input type="hidden" id="tx-category" required aria-labelledby="tx-category-label">
+        </div>
+
+        <div id="tx-repeat-field">
+          <label for="tx-repeat" class="text-xs text-slate-400 font-semibold mb-1 block">Повтор операции</label>
+          <select id="tx-repeat" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-sm text-white">
+            <option value="none">Не повторять</option><option value="weekly">Каждую неделю</option><option value="monthly">Каждый месяц</option><option value="yearly">Каждый год</option>
+          </select>
+          <p class="text-[10px] text-slate-500 mt-1">Будущие записи создаются при следующем открытии приложения.</p>
+        </div>
         </div>
 
         <div>
@@ -692,6 +767,7 @@
           <h4 class="text-sm font-bold text-white" id="settings-appearance-title">Внешний вид и суммы</h4>
           <p class="text-xs text-slate-400 mt-0.5">Настройте цвет приложения и формат денег</p>
         </div>
+
         <div>
           <label for="settings-currency" class="text-xs text-slate-300 font-semibold mb-1.5 block">Валюта отображения</label>
           <select id="settings-currency" onchange="updateCurrencyPreference(this.value)" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500">
@@ -702,6 +778,11 @@
           </select>
           <p class="text-[11px] text-slate-500 mt-1.5">Меняется только подпись и формат. Конвертации сумм нет.</p>
         </div>
+        <div>
+          <label for="settings-payday" class="text-xs text-slate-300 font-semibold mb-1.5 block">День получения зарплаты</label>
+          <input id="settings-payday" type="number" min="1" max="31" inputmode="numeric" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-sm text-white" onchange="savePaydayPreference(this.value)">
+          <p class="text-[11px] text-slate-500 mt-1.5">Расчёт учитывает ближайшие подписки и запланированные цели.</p>
+        </div>
         <fieldset>
           <legend class="text-xs text-slate-300 font-semibold mb-2">Цвет акцента</legend>
           <div class="flex gap-3">
@@ -711,6 +792,18 @@
             <button type="button" data-accent-option="rose" onclick="setAccentPreference('rose')" aria-label="Розовый акцент" aria-pressed="false" class="accent-swatch" style="--swatch:#f43f5e"></button>
           </div>
         </fieldset>
+      </section>
+
+      <section class="rounded-2xl p-4 bg-slate-950 border border-slate-800 space-y-3" aria-labelledby="settings-privacy-title">
+        <div>
+          <h4 id="settings-privacy-title" class="text-sm font-bold text-white">Приватность</h4>
+          <p class="text-[11px] text-slate-400 mt-1">PIN блокирует экран приложения. Данные в браузере не шифруются PIN-кодом.</p>
+        </div>
+        <div class="grid grid-cols-[1fr_auto] gap-2">
+          <input id="settings-pin" type="password" inputmode="numeric" autocomplete="new-password" maxlength="8" minlength="4" placeholder="Новый PIN, 4–8 цифр" class="min-w-0 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-sm text-white">
+          <button type="button" onclick="saveAppPin()" class="rounded-xl bg-slate-800 px-3 py-2 text-xs font-bold text-white">Сохранить PIN</button>
+        </div>
+        <button type="button" id="btn-remove-pin" onclick="removeAppPin()" class="hidden text-xs text-rose-300">Удалить PIN-код</button>
       </section>
 
       <!-- Notifications -->
@@ -802,6 +895,47 @@
       </div>
 
     </div>
+  </div>
+
+  <div id="modal-account" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="account-modal-title" class="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center hidden opacity-0 transition-opacity duration-300">
+    <div class="glass-card bg-slate-900 border-t sm:border border-slate-700 w-full max-w-lg rounded-t-3xl sm:rounded-3xl p-5 space-y-4">
+      <div class="flex justify-between items-center border-b border-slate-800 pb-3"><h3 id="account-modal-title" class="text-base font-bold text-white">Новый счёт</h3><button type="button" onclick="closeModal('modal-account')" aria-label="Закрыть окно счёта" class="p-1 text-slate-400">✕</button></div>
+      <form id="form-account" onsubmit="saveAccount(event)" class="space-y-3">
+        <input id="account-id" type="hidden">
+        <label class="block text-xs text-slate-400">Название<input id="account-name" maxlength="48" required class="mt-1 w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-3 text-sm text-white" placeholder="Например, Основная карта"></label>
+        <label class="block text-xs text-slate-400">Тип<select id="account-type" class="mt-1 w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-3 text-sm text-white"><option value="card">Банковская карта</option><option value="checking">Текущий счёт</option><option value="savings">Накопительный счёт</option><option value="cash">Наличные</option></select></label>
+        <label class="block text-xs text-slate-400">Начальный баланс<input id="account-opening-balance" type="number" step="any" required value="0" class="mt-1 w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-3 text-sm text-white"></label>
+        <label class="block text-xs text-slate-400">Цвет<select id="account-color" class="mt-1 w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-3 text-sm text-white"></select></label>
+        <button type="submit" class="w-full rounded-xl bg-blue-600 py-3 text-sm font-bold text-white">Сохранить счёт</button>
+        <button type="button" id="account-delete" onclick="deleteEditingAccount()" class="hidden w-full rounded-xl border border-rose-500/20 py-3 text-sm font-bold text-rose-300">Удалить счёт</button>
+      </form>
+    </div>
+  </div>
+
+  <div id="modal-goal" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="goal-modal-title" class="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center hidden opacity-0 transition-opacity duration-300">
+    <div class="glass-card bg-slate-900 border-t sm:border border-slate-700 w-full max-w-lg rounded-t-3xl sm:rounded-3xl p-5 space-y-4">
+      <div class="flex justify-between items-center border-b border-slate-800 pb-3"><h3 id="goal-modal-title" class="text-base font-bold text-white">Новая цель</h3><button type="button" onclick="closeModal('modal-goal')" aria-label="Закрыть окно цели" class="p-1 text-slate-400">✕</button></div>
+      <form id="form-goal" onsubmit="saveGoal(event)" class="space-y-3">
+        <input id="goal-id" type="hidden">
+        <label class="block text-xs text-slate-400">Название<input id="goal-name" maxlength="64" required class="mt-1 w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-3 text-sm text-white" placeholder="Например, Подушка безопасности"></label>
+        <label class="block text-xs text-slate-400">Целевая сумма<input id="goal-target" type="number" min="0.01" step="any" required class="mt-1 w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-3 text-sm text-white"></label>
+        <label class="block text-xs text-slate-400">Уже накоплено<input id="goal-saved" type="number" min="0" step="any" value="0" required class="mt-1 w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-3 text-sm text-white"></label>
+        <label class="block text-xs text-slate-400">Срок (необязательно)<input id="goal-deadline" type="date" class="mt-1 w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-3 text-sm text-white"></label>
+        <label class="block text-xs text-slate-400">Вид цели<select id="goal-kind" class="mt-1 w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-3 text-sm text-white"><option value="goal">Накопление</option><option value="emergency">Подушка безопасности</option></select></label>
+        <button type="submit" class="w-full rounded-xl bg-emerald-500 py-3 text-sm font-bold text-slate-950">Сохранить цель</button>
+      </form>
+    </div>
+  </div>
+
+  <div id="app-lock-screen" class="fixed inset-0 z-[100] hidden items-center justify-center bg-slate-950 p-6" aria-hidden="true">
+    <form onsubmit="unlockApp(event)" class="w-full max-w-xs space-y-4 text-center">
+      <div class="mx-auto w-14 h-14 rounded-2xl bg-emerald-500/15 text-emerald-300 grid place-items-center text-2xl">◈</div>
+      <h2 class="text-xl font-bold text-white">FinFlow заблокирован</h2>
+      <p class="text-xs text-slate-400">Введите PIN-код, чтобы продолжить.</p>
+      <input id="unlock-pin" type="password" inputmode="numeric" autocomplete="current-password" maxlength="8" required class="w-full rounded-xl bg-slate-900 border border-slate-700 px-4 py-3 text-center text-xl tracking-[0.4em] text-white" aria-label="PIN-код">
+      <p id="unlock-error" class="hidden text-xs text-rose-300" role="alert">Неверный PIN-код.</p>
+      <button type="submit" class="w-full rounded-xl bg-emerald-500 py-3 font-bold text-slate-950">Разблокировать</button>
+    </form>
   </div>
 
     <script src="./core.js"></script>

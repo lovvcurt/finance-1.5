@@ -85,6 +85,27 @@
     .pb-safe {
       padding-bottom: calc(env(safe-area-inset-bottom, 20px) + 4rem);
     }
+
+    .account-chip {
+      display: flex;
+      min-width: 0;
+      min-height: 6.5rem;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: .35rem;
+      padding: .85rem;
+      border: 1px solid color-mix(in srgb, var(--account-color, #3b82f6) 32%, transparent);
+      border-radius: 1.15rem;
+      background: linear-gradient(145deg, color-mix(in srgb, var(--account-color, #3b82f6) 16%, #111827), #111827 75%);
+    }
+    .account-chip-type { color: #94a3b8; font-size: .6rem; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
+    .account-chip strong { overflow: hidden; color: #f8fafc; font-size: .72rem; text-overflow: ellipsis; white-space: nowrap; }
+    .account-chip-balance { color: #e2e8f0; font-size: .75rem; font-weight: 800; }
+    .account-chip-more { align-items: center; justify-content: center; color: #93c5fd; font-size: .75rem; font-weight: 700; }
+    .profile-action { display: flex; min-width: 0; flex-direction: column; align-items: flex-start; gap: .2rem; padding: .85rem; border: 1px solid rgba(148,163,184,.12); border-radius: 1rem; background: rgba(15,23,42,.7); text-align: left; }
+    .profile-action > span:not(.profile-action-icon) { color: #f8fafc; font-size: .72rem; font-weight: 700; }
+    .profile-action small { color: #94a3b8; font-size: .6rem; }
+    .profile-action-icon { color: #6ee7b7; font-size: 1rem; }
     .pb-nav-safe {
       padding-bottom: env(safe-area-inset-bottom, 12px);
     }

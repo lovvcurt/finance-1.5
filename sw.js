@@ -1,4 +1,4 @@
-const CACHE_NAME = 'finflow-shell-v2';
+const CACHE_NAME = 'finflow-shell-v3';
 const APP_ROOT = self.registration.scope;
 const APP_SHELL = [
   'index.html',

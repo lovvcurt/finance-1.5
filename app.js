@@ -2,6 +2,7 @@
     // CATEGORY MASTER DEFINITIONS
     // =========================================================================
     let CATEGORIES = {
+      transfer: { id: 'transfer', name: 'Перевод между счетами', type: 'transfer', color: '#38BDF8', bgColor: 'rgba(56, 189, 248, 0.15)', svg: `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7h14m0 0l-3-3m3 3l-3 3M20 17H6m0 0l3 3m-3-3l3-3"/></svg>` },
       food: { id: 'food', name: 'Еда и продукты', type: 'expense', color: '#10B981', bgColor: 'rgba(16, 185, 129, 0.15)', svg: `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 100 4 2 2 0 000-4z"/></svg>` },
       restaurants: { id: 'restaurants', name: 'Рестораны и кафе', type: 'expense', color: '#F59E0B', bgColor: 'rgba(245, 158, 11, 0.15)', svg: `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/></svg>` },
       transport: { id: 'transport', name: 'Транспорт и авто', type: 'expense', color: '#3B82F6', bgColor: 'rgba(59, 130, 246, 0.15)', svg: `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h8m-8 4h8m-9 8h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>` },
@@ -52,8 +53,12 @@
     ];
 
     const {
+      ACCOUNT_COLORS,
       DEFAULT_BUDGETS,
+      DEFAULT_ACCOUNTS,
       MAX_BACKUP_BYTES,
+      advanceRecurringDate,
+      calculateAccountBalances,
       createId,
       currencySymbol,
       escapeHtml,
@@ -92,6 +97,9 @@
 
     let appState = {
       transactions: [],
+      accounts: DEFAULT_ACCOUNTS.map(account => ({ ...account })),
+      goals: [],
+      recurring: [],
       subscriptions: [],
       budgets: { ...DEFAULT_BUDGETS },
       currentTab: 'dashboard',
@@ -102,18 +110,25 @@
       debts: [],
       categories: [],
       debtFilter: 'all',
-      settings: { currency: 'RUB', accent: 'blue' }
+      settings: { currency: 'RUB', accent: 'blue', payday: 10 },
+      privacy: { hideBalances: false, pinSalt: null, pinHash: null }
     };
     let modalReturnFocus = null;
 
-    const formatRub = (val) => formatCurrency(val, appState.settings?.currency || 'RUB');
+    const formatRub = (val) => appState.privacy?.hideBalances
+      ? '••••••'
+      : formatCurrency(val, appState.settings?.currency || 'RUB');
     const getCurrencySymbol = () => currencySymbol(appState.settings?.currency || 'RUB');
+    const getAccountBalances = () => calculateAccountBalances(appState.accounts, appState.transactions);
+    const getTotalBalance = () => Object.values(getAccountBalances()).reduce((sum, balance) => sum + balance, 0);
 
     function applyUserPreferences() {
       const settings = appState.settings || { currency: 'RUB', accent: 'blue' };
       document.body.dataset.accent = settings.accent;
       const currencySelect = document.getElementById('settings-currency');
       if (currencySelect) currencySelect.value = settings.currency;
+      const paydayInput = document.getElementById('settings-payday');
+      if (paydayInput) paydayInput.value = settings.payday || 10;
       document.querySelectorAll('[data-currency-label]').forEach(label => { label.textContent = getCurrencySymbol(); });
       document.querySelectorAll('[data-accent-option]').forEach(button => {
         button.setAttribute('aria-pressed', String(button.dataset.accentOption === settings.accent));
@@ -135,6 +150,19 @@
       applyUserPreferences();
       saveStateToLocalStorage();
     }
+
+    function setHideBalances(hidden) {
+      appState.privacy.hideBalances = Boolean(hidden);
+      saveStateToLocalStorage();
+      renderDashboardTab();
+      renderProfileTab();
+      renderGoalsTab();
+      renderTransactionsTab();
+      renderAnalyticsTab();
+      renderSubscriptionsTab();
+      renderDebtsTab();
+      renderForecastTab();
+    }
     const formatDateRu = (dateStr) => {
       const date = parseDateOnly(dateStr);
       return Number.isNaN(date.getTime()) ? 'Некорректная дата' : date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
@@ -145,9 +173,16 @@
       const yr = today.getFullYear();
       const mo = String(today.getMonth() + 1).padStart(2, '0');
       const savedSettings = { ...(appState.settings || { currency: 'RUB', accent: 'blue' }) };
+      const savedPrivacy = { ...(appState.privacy || { hideBalances: false, pinSalt: null, pinHash: null }) };
 
       appState = {
         transactions: [],
+        accounts: [
+          { id: 'account-main', name: 'Основная карта', type: 'card', openingBalance: 0, color: '#3B82F6' },
+          { id: 'account-savings', name: 'Сбережения', type: 'savings', openingBalance: 45000, color: '#10B981' }
+        ],
+        goals: [{ id: 'goal-emergency', name: 'Финансовая подушка', targetAmount: 100000, savedAmount: 35000, deadline: null, kind: 'emergency' }],
+        recurring: [],
         subscriptions: [],
         budgets: { ...DEFAULT_BUDGETS },
         currentTab: 'dashboard',
@@ -158,7 +193,8 @@
         debts: [],
         categories: [],
         debtFilter: 'all',
-        settings: savedSettings
+        settings: { payday: 10, ...savedSettings },
+        privacy: savedPrivacy
       };
 
       appState.transactions = [
@@ -223,6 +259,31 @@
         appState = normalizeAppState({});
         rebuildCustomCategories();
         showInAppToast('Не удалось прочитать данные', 'Исходная запись сохранена для восстановления. Импортируйте рабочую резервную копию.');
+      }
+    }
+
+    function materializeRecurringOperations(today = formatDateOnly()) {
+      let created = 0;
+      appState.recurring.forEach(rule => {
+        if (!rule.enabled) return;
+        let guard = 0;
+        while (rule.nextDate <= today && guard < 120) {
+          const date = rule.nextDate;
+          const alreadyExists = appState.transactions.some(tx => tx.recurringId === rule.id && tx.date === date);
+          if (!alreadyExists) {
+            appState.transactions.unshift({
+              id: createId('tx'), type: rule.type, amount: rule.amount, category: rule.category,
+              accountId: rule.accountId, date, note: rule.note, recurringId: rule.id
+            });
+            created++;
+          }
+          rule.nextDate = advanceRecurringDate(date, rule.cycle, rule.anchorDay, rule.anchorMonth);
+          guard++;
+        }
+      });
+      if (created) {
+        saveStateToLocalStorage();
+        showInAppToast('Повтор операции добавлен', `Создано операций: ${created}.`);
       }
     }
 
@@ -390,7 +451,8 @@
         }
       }
 
-      const nextPaymentDate = new Date(targetYear, targetMonth, sub.payday);
+      const targetLastDay = new Date(targetYear, targetMonth + 1, 0).getDate();
+      const nextPaymentDate = new Date(targetYear, targetMonth, Math.min(sub.payday, targetLastDay));
       const diffTime = nextPaymentDate - new Date(currentYear, currentMonth, todayDay);
       const daysLeft = Math.round(diffTime / (1000 * 60 * 60 * 24));
 
@@ -425,7 +487,9 @@
     // CORE TAB SWITCHING
     // =========================================================================
     function switchTab(tabId) {
-      if (!['dashboard', 'transactions', 'subscriptions', 'analytics', 'forecast', 'debts'].includes(tabId)) return;
+      const profileSubtabs = ['subscriptions', 'forecast', 'debts'];
+      if (!['dashboard', 'transactions', 'subscriptions', 'analytics', 'forecast', 'debts', 'goals', 'profile'].includes(tabId)) return;
+      const activeNavTab = profileSubtabs.includes(tabId) ? 'profile' : tabId;
       appState.currentTab = tabId;
 
       document.querySelectorAll('.tab-content').forEach(el => {
@@ -436,6 +500,15 @@
       if (activeContent) {
         activeContent.classList.remove('hidden');
         activeContent.setAttribute('aria-hidden', 'false');
+        if (profileSubtabs.includes(tabId) && !activeContent.querySelector('[data-profile-back]')) {
+          const back = document.createElement('button');
+          back.type = 'button';
+          back.dataset.profileBack = 'true';
+          back.className = 'rounded-xl border border-slate-800 bg-slate-900 px-3 py-2 text-xs font-semibold text-slate-300';
+          back.textContent = '← В профиль';
+          back.onclick = () => switchTab('profile');
+          activeContent.prepend(back);
+        }
       }
 
       document.querySelectorAll('.nav-item').forEach(btn => {
@@ -443,7 +516,7 @@
         btn.classList.add('text-slate-400');
         btn.removeAttribute('aria-current');
       });
-      const activeBtn = document.getElementById(`nav-btn-${tabId}`);
+      const activeBtn = document.getElementById(`nav-btn-${activeNavTab}`);
       if (activeBtn) {
         activeBtn.classList.remove('text-slate-400');
         activeBtn.classList.add('text-blue-500');
@@ -456,6 +529,8 @@
       if (tabId === 'analytics') renderAnalyticsTab();
       if (tabId === 'forecast') renderForecastTab();
       if (tabId === 'debts') renderDebtsTab();
+      if (tabId === 'goals') renderGoalsTab();
+      if (tabId === 'profile') renderProfileTab();
 
       const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
       window.scrollTo({ top: 0, behavior: reducedMotion ? 'auto' : 'smooth' });
@@ -481,21 +556,24 @@
         }
       });
 
-      const totalBalance = totalIncome - totalExpense;
-      const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
-      const currentDay = Math.min(now.getDate(), daysInMonth);
-      const daysRemaining = Math.max(1, daysInMonth - currentDay + 1);
-
+      const totalBalance = getTotalBalance();
       const totalBudget = Object.values(appState.budgets).reduce((a, b) => a + Number(b), 0);
       const budgetRemaining = Math.max(0, totalBudget - totalExpense);
-      const safeDailyLimit = budgetRemaining / daysRemaining;
 
       document.getElementById('dash-total-balance').textContent = formatRub(totalBalance);
       document.getElementById('dash-month-income').textContent = '+' + formatRub(totalIncome);
       document.getElementById('dash-month-expense').textContent = '-' + formatRub(totalExpense);
-      document.getElementById('dash-safe-daily').textContent = formatRub(safeDailyLimit) + ' / день';
-      document.getElementById('dash-days-left').textContent = `${daysRemaining} дн. остал.`;
       document.getElementById('dash-budget-remain').textContent = formatRub(budgetRemaining);
+      renderHomeAccounts();
+      renderHomeGoal();
+      const paydayInfo = getNextPaydayInfo(now);
+      const upcomingSubs = appState.subscriptions.filter(sub => sub.active).reduce((total, sub) => {
+        const next = getSubscriptionNextPaymentInfo(sub);
+        return next.daysLeft <= paydayInfo.days ? total + Number(sub.amount) : total;
+      }, 0);
+      const availableBeforePayday = Math.max(0, totalBalance - upcomingSubs - appState.goals.reduce((sum, goal) => sum + goal.savedAmount, 0));
+      document.getElementById('dash-payday-limit').textContent = formatRub(availableBeforePayday / Math.max(1, paydayInfo.days)) + ' / день';
+      document.getElementById('dash-days-left').textContent = paydayInfo.days === 0 ? 'Зарплата сегодня' : `До зарплаты: ${paydayInfo.days} дн.`;
 
       // Render Subscriptions Widget on Dashboard
       renderDashboardSubWidget();
@@ -513,6 +591,10 @@
       sortedTxs.forEach(tx => {
         const cat = CATEGORIES[tx.category] || { name: 'Прочее', color: '#64748B', bgColor: 'rgba(100,116,139,0.15)', svg: '' };
         const isExp = tx.type === 'expense';
+        const isTransfer = tx.type === 'transfer';
+        const accountText = isTransfer
+          ? `${appState.accounts.find(a => a.id === tx.fromAccountId)?.name || 'Счёт'} → ${appState.accounts.find(a => a.id === tx.toAccountId)?.name || 'Счёт'}`
+          : appState.accounts.find(a => a.id === tx.accountId)?.name || 'Счёт';
 
         const item = document.createElement('div');
         item.className = 'glass-card p-3 rounded-2xl flex items-center justify-between';
@@ -523,14 +605,14 @@
             </div>
             <div class="min-w-0">
               <p class="text-xs font-bold text-white truncate">${escapeHtml(tx.note || cat.name)}</p>
-              <p class="text-[10px] text-slate-400 font-medium truncate">${escapeHtml(cat.name)} • ${formatDateRu(tx.date)}</p>
+              <p class="text-[10px] text-slate-400 font-medium truncate">${escapeHtml(cat.name)} · ${escapeHtml(accountText)} · ${formatDateRu(tx.date)}</p>
             </div>
           </button>
           <button type="button" onclick="${inlineHandler('openTransactionEdit', tx.id)}" aria-label="Редактировать операцию: ${escapeHtml(tx.note || cat.name)}" class="p-2 rounded-xl text-slate-500 hover:text-blue-400">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" d="M12 20h9"/><path fill="none" stroke="currentColor" stroke-width="2" d="M16.5 3.5a2.1 2.1 0 013 3L8 18l-4 1 1-4 11.5-11.5z"/></svg>
           </button>
-          <span class="text-sm font-extrabold ${isExp ? 'text-rose-400' : 'text-emerald-400'} whitespace-nowrap">
-            ${isExp ? '-' : '+'}${formatRub(tx.amount)}
+          <span class="text-sm font-extrabold ${isTransfer ? 'text-sky-300' : isExp ? 'text-rose-400' : 'text-emerald-400'} whitespace-nowrap">
+            ${isTransfer ? '⇄ ' : isExp ? '-' : '+'}${formatRub(tx.amount)}
           </span>
         `;
         recentList.appendChild(item);
@@ -586,10 +668,10 @@
 
     function renderTransactionsTab() {
       const searchVal = (document.getElementById('tx-search').value || '').toLowerCase();
-      const catVal = document.getElementById('tx-category-select').value;
-
+      renderAccountSelectors();
       const catSelect = document.getElementById('tx-category-select');
       const currentCat = catSelect.value || 'ALL';
+      const catVal = currentCat;
       catSelect.innerHTML = '<option value="ALL">Все категории</option>';
       Object.values(CATEGORIES).forEach(c => {
         const opt = document.createElement('option');
@@ -598,15 +680,20 @@
         catSelect.appendChild(opt);
       });
       catSelect.value = CATEGORIES[currentCat] ? currentCat : 'ALL';
+      const accountVal = document.getElementById('tx-account-select').value;
 
       const filtered = appState.transactions.filter(tx => {
         const matchesType = appState.txFilterType === 'all' || tx.type === appState.txFilterType;
         const matchesCat = catVal === 'ALL' || tx.category === catVal;
+        const matchesAccount = accountVal === 'ALL' || tx.accountId === accountVal || tx.fromAccountId === accountVal || tx.toAccountId === accountVal;
         const catObj = CATEGORIES[tx.category];
+        const accountNames = tx.type === 'transfer'
+          ? `${appState.accounts.find(a => a.id === tx.fromAccountId)?.name || ''} ${appState.accounts.find(a => a.id === tx.toAccountId)?.name || ''}`
+          : appState.accounts.find(a => a.id === tx.accountId)?.name || '';
         const matchesSearch = !searchVal ||
           (tx.note && tx.note.toLowerCase().includes(searchVal)) ||
-          (catObj && catObj.name.toLowerCase().includes(searchVal));
-        return matchesType && matchesCat && matchesSearch;
+          (catObj && catObj.name.toLowerCase().includes(searchVal)) || accountNames.toLowerCase().includes(searchVal);
+        return matchesType && matchesCat && matchesAccount && matchesSearch;
       });
 
       document.getElementById('tx-count-label').textContent = `Показано: ${filtered.length} записей`;
@@ -638,6 +725,10 @@
         grouped[dateStr].forEach(tx => {
           const cat = CATEGORIES[tx.category] || { name: 'Прочее', color: '#64748B', bgColor: 'rgba(100,116,139,0.15)', svg: '' };
           const isExp = tx.type === 'expense';
+          const isTransfer = tx.type === 'transfer';
+          const accountText = isTransfer
+            ? `${appState.accounts.find(a => a.id === tx.fromAccountId)?.name || 'Счёт'} → ${appState.accounts.find(a => a.id === tx.toAccountId)?.name || 'Счёт'}`
+            : appState.accounts.find(a => a.id === tx.accountId)?.name || 'Счёт';
 
           const card = document.createElement('div');
           card.className = 'glass-card p-3.5 rounded-2xl flex items-center justify-between border border-slate-800/80 hover:bg-slate-800/50 transition';
@@ -648,12 +739,12 @@
               </div>
               <div class="min-w-0">
                 <p class="text-xs font-bold text-white truncate">${escapeHtml(tx.note || cat.name)}</p>
-                <p class="text-[10px] text-slate-400 truncate">${escapeHtml(cat.name)}</p>
+                <p class="text-[10px] text-slate-400 truncate">${escapeHtml(cat.name)} · ${escapeHtml(accountText)}</p>
               </div>
             </button>
             <div class="flex items-center space-x-1.5 ml-2">
-              <span class="text-sm font-extrabold ${isExp ? 'text-rose-400' : 'text-emerald-400'} whitespace-nowrap">
-                ${isExp ? '-' : '+'}${formatRub(tx.amount)}
+              <span class="text-sm font-extrabold ${isTransfer ? 'text-sky-300' : isExp ? 'text-rose-400' : 'text-emerald-400'} whitespace-nowrap">
+                ${isTransfer ? '⇄ ' : isExp ? '-' : '+'}${formatRub(tx.amount)}
               </span>
               <button onclick="${inlineHandler('openTransactionEdit', tx.id)}" aria-label="Редактировать операцию: ${escapeHtml(tx.note || cat.name)}" class="p-1.5 rounded-xl text-slate-500 hover:text-blue-400 hover:bg-blue-500/10 transition">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" d="M12 20h9"/><path fill="none" stroke="currentColor" stroke-width="2" d="M16.5 3.5a2.1 2.1 0 013 3L8 18l-4 1 1-4 11.5-11.5z"/></svg>
@@ -1058,14 +1149,21 @@
 
       const categoryTotals = {};
       let totalExpense = 0;
+      let totalIncome = 0;
+      const previousDate = new Date(currentYear, currentMonth - 1, 1);
+      let previousExpense = 0;
 
       appState.transactions.forEach(tx => {
         const d = parseDateOnly(tx.date);
-        if (d.getFullYear() === currentYear && d.getMonth() === currentMonth && tx.type === 'expense') {
-          const amt = Number(tx.amount);
-          categoryTotals[tx.category] = (categoryTotals[tx.category] || 0) + amt;
-          totalExpense += amt;
+        if (d.getFullYear() === currentYear && d.getMonth() === currentMonth) {
+          if (tx.type === 'income') totalIncome += Number(tx.amount);
+          if (tx.type === 'expense') {
+            const amt = Number(tx.amount);
+            categoryTotals[tx.category] = (categoryTotals[tx.category] || 0) + amt;
+            totalExpense += amt;
+          }
         }
+        if (d.getFullYear() === previousDate.getFullYear() && d.getMonth() === previousDate.getMonth() && tx.type === 'expense') previousExpense += Number(tx.amount);
       });
 
       document.getElementById('analytics-total-sum').textContent = formatRub(totalExpense);
@@ -1077,9 +1175,35 @@
       const categoryListContainer = document.getElementById('analytics-category-list');
       categoryListContainer.innerHTML = '';
 
+      const expenseChange = previousExpense > 0 ? (totalExpense - previousExpense) / previousExpense * 100 : null;
+      const changeText = expenseChange === null ? (totalExpense > 0 ? 'Нет базы сравнения' : 'Нет расходов в обоих месяцах') : `${expenseChange > 0 ? '+' : ''}${expenseChange.toFixed(0)}% к прошлому месяцу`;
+      const upcomingMandatory = appState.subscriptions.filter(sub => sub.active).reduce((sum, sub) => {
+        const info = getSubscriptionNextPaymentInfo(sub);
+        return sum + (info.daysLeft <= 30 ? Number(sub.amount) : 0);
+      }, 0);
+      const afterMandatory = getTotalBalance() - upcomingMandatory;
+      document.getElementById('analytics-month-summary').innerHTML = `
+        <div class="glass-card rounded-2xl p-3"><p class="text-[10px] text-slate-500">Доходы за месяц</p><p class="mt-1 text-sm font-bold text-emerald-300">+${formatRub(totalIncome)}</p></div>
+        <div class="glass-card rounded-2xl p-3"><p class="text-[10px] text-slate-500">Расходы к прошлому месяцу</p><p class="mt-1 text-sm font-bold ${expenseChange !== null && expenseChange > 0 ? 'text-rose-300' : 'text-slate-200'}">${escapeHtml(changeText)}</p></div>
+        <div class="glass-card rounded-2xl p-3 col-span-2"><p class="text-[10px] text-slate-500">Баланс после ближайших подписок (30 дней)</p><p class="mt-1 text-sm font-bold text-white">${formatRub(afterMandatory)} <span class="text-[10px] font-normal text-slate-500">· подписки: ${formatRub(upcomingMandatory)}</span></p></div>`;
+
+      const months = Array.from({ length: 6 }, (_, index) => new Date(currentYear, currentMonth - 5 + index, 1));
+      const monthTotals = months.map(month => {
+        const totals = { month, income: 0, expense: 0 };
+        appState.transactions.forEach(tx => {
+          const date = parseDateOnly(tx.date);
+          if (date.getFullYear() === month.getFullYear() && date.getMonth() === month.getMonth()) {
+            if (tx.type === 'income') totals.income += Number(tx.amount);
+            if (tx.type === 'expense') totals.expense += Number(tx.amount);
+          }
+        });
+        return totals;
+      });
+      const maxMonthlyValue = Math.max(1, ...monthTotals.flatMap(item => [item.income, item.expense]));
+      document.getElementById('analytics-trend').innerHTML = `<div class="flex items-start justify-between"><div><h3 class="text-xs font-bold text-white">Динамика за 6 месяцев</h3><p class="text-[10px] text-slate-500 mt-1">Переводы не учитываются как доход или расход</p></div><div class="flex gap-2 text-[9px]"><span class="text-emerald-300">● Доход</span><span class="text-rose-300">● Расход</span></div></div><div class="mt-4 grid grid-cols-6 gap-2 items-end">${monthTotals.map(item => `<div class="min-w-0 text-center"><div class="h-24 flex items-end justify-center gap-1"><span title="Доходы: ${escapeHtml(formatRub(item.income))}" class="w-2.5 rounded-t bg-emerald-400/80" style="height:${Math.max(item.income ? 4 : 0, item.income / maxMonthlyValue * 100)}%"></span><span title="Расходы: ${escapeHtml(formatRub(item.expense))}" class="w-2.5 rounded-t bg-rose-400/80" style="height:${Math.max(item.expense ? 4 : 0, item.expense / maxMonthlyValue * 100)}%"></span></div><span class="mt-2 block truncate text-[9px] text-slate-500">${item.month.toLocaleDateString('ru-RU', { month: 'short' })}</span></div>`).join('')}</div>`;
+
       if (totalExpense === 0) {
         categoryListContainer.innerHTML = `<div class="glass-card p-8 text-center rounded-3xl text-slate-500 text-xs">Нет расходов в этом месяце</div>`;
-        return;
       }
 
       const sortedCategories = Object.keys(categoryTotals)
@@ -1239,10 +1363,13 @@
       if (!currentModal && !modalReturnFocus) modalReturnFocus = document.activeElement;
 
       if (modalId === 'modal-add-tx' && reset) {
+        renderAccountSelectors();
         setTxType(initialType);
         document.getElementById('tx-id').value = '';
         document.getElementById('tx-modal-title').textContent = 'Новая операция';
         document.getElementById('tx-delete-btn').classList.add('hidden');
+        document.getElementById('tx-repeat-field').classList.remove('hidden');
+        document.getElementById('tx-repeat').value = 'none';
         document.getElementById('tx-date').value = formatDateOnly();
         document.getElementById('tx-amount').value = '';
         document.getElementById('tx-note').value = '';
@@ -1260,6 +1387,8 @@
         updateNotificationStatusUI();
         renderBudgetsTab();
         applyUserPreferences();
+        const removePin = document.getElementById('btn-remove-pin');
+        if (removePin) removePin.classList.toggle('hidden', !appState.privacy.pinHash);
       }
 
       modal.classList.remove('hidden');
@@ -1269,6 +1398,341 @@
         const focusTarget = modal.querySelector('button:not([disabled]), input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])');
         if (focusTarget) focusTarget.focus({ preventScroll: true });
       }, 10);
+    }
+
+    function getNextPaydayInfo(fromDate = new Date()) {
+      const payday = appState.settings.payday || 10;
+      const today = new Date(fromDate.getFullYear(), fromDate.getMonth(), fromDate.getDate());
+      let next = new Date(today.getFullYear(), today.getMonth(), Math.min(payday, new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate()));
+      if (next < today) {
+        const year = today.getFullYear();
+        const month = today.getMonth() + 1;
+        next = new Date(year, month, Math.min(payday, new Date(year, month + 1, 0).getDate()));
+      }
+      const startUtc = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
+      const nextUtc = Date.UTC(next.getFullYear(), next.getMonth(), next.getDate());
+      return { date: next, days: Math.max(0, Math.round((nextUtc - startUtc) / 86400000)) };
+    }
+
+    function renderHomeAccounts() {
+      const container = document.getElementById('home-account-cards');
+      if (!container) return;
+      const balances = getAccountBalances();
+      container.innerHTML = appState.accounts.slice(0, 3).map(account => `
+        <div class="account-chip" style="--account-color:${account.color}">
+          <span class="account-chip-type">${escapeHtml(getAccountTypeLabel(account.type))}</span>
+          <strong>${escapeHtml(account.name)}</strong>
+          <span class="account-chip-balance">${formatRub(balances[account.id] || 0)}</span>
+        </div>
+      `).join('');
+      if (appState.accounts.length > 3) {
+        container.insertAdjacentHTML('beforeend', `<button type="button" onclick="switchTab('profile')" class="account-chip account-chip-more">+${appState.accounts.length - 3} счёта</button>`);
+      }
+    }
+
+    function renderHomeGoal() {
+      const container = document.getElementById('home-goal-card');
+      if (!container) return;
+      const goal = [...appState.goals].sort((a, b) => (b.savedAmount / b.targetAmount) - (a.savedAmount / a.targetAmount))[0];
+      if (!goal) {
+        container.innerHTML = `<button type="button" onclick="switchTab('goals')" class="w-full glass-card rounded-2xl p-4 text-left"><span class="text-xs font-bold text-white">Начните с финансовой цели</span><span class="block text-[11px] text-slate-400 mt-1">Создайте подушку безопасности или запланируйте покупку</span></button>`;
+        return;
+      }
+      const percent = Math.min(100, Math.round(goal.savedAmount / goal.targetAmount * 100));
+      container.innerHTML = `
+        <button type="button" onclick="switchTab('goals')" class="w-full glass-card rounded-2xl p-4 text-left space-y-3">
+          <div class="flex items-start justify-between gap-3"><div><span class="text-[10px] uppercase tracking-wider text-emerald-300">${goal.kind === 'emergency' ? 'Подушка безопасности' : 'Цель'}</span><h3 class="text-sm font-bold text-white mt-1">${escapeHtml(goal.name)}</h3></div><span class="text-xs font-bold text-emerald-300">${percent}%</span></div>
+          <div class="h-2 rounded-full bg-slate-800 overflow-hidden"><div class="h-full rounded-full bg-emerald-400" style="width:${percent}%"></div></div>
+          <div class="flex justify-between text-[11px] text-slate-400"><span>${formatRub(goal.savedAmount)} накоплено</span><span>из ${formatRub(goal.targetAmount)}</span></div>
+        </button>
+      `;
+    }
+
+    function getAccountTypeLabel(type) {
+      return ({ checking: 'Счёт', card: 'Карта', cash: 'Наличные', savings: 'Накопительный' })[type] || 'Счёт';
+    }
+
+    function renderAccountSelectors() {
+      const balances = getAccountBalances();
+      const options = appState.accounts.map(account => `<option value="${escapeHtml(account.id)}">${escapeHtml(account.name)} · ${formatRub(balances[account.id] || 0)}</option>`).join('');
+      ['tx-account', 'tx-account-source', 'tx-account-target'].forEach(id => {
+        const select = document.getElementById(id);
+        if (!select) return;
+        const previous = select.value;
+        select.innerHTML = options;
+        if (appState.accounts.some(account => account.id === previous)) select.value = previous;
+      });
+      const filter = document.getElementById('tx-account-select');
+      if (filter) {
+        const previous = filter.value || 'ALL';
+        filter.innerHTML = '<option value="ALL">Все счета</option>' + appState.accounts.map(account => `<option value="${escapeHtml(account.id)}">${escapeHtml(account.name)}</option>`).join('');
+        filter.value = appState.accounts.some(account => account.id === previous) ? previous : 'ALL';
+      }
+      const colorSelect = document.getElementById('account-color');
+      if (colorSelect && !colorSelect.options.length) {
+        colorSelect.innerHTML = ACCOUNT_COLORS.map((color, index) => `<option value="${color}">Цвет ${index + 1}</option>`).join('');
+      }
+    }
+
+    function openAccountModal(accountId = '') {
+      renderAccountSelectors();
+      document.getElementById('form-account').reset();
+      document.getElementById('account-id').value = '';
+      document.getElementById('account-opening-balance').value = '0';
+      document.getElementById('account-color').value = ACCOUNT_COLORS[appState.accounts.length % ACCOUNT_COLORS.length];
+      document.getElementById('account-delete').classList.add('hidden');
+      document.getElementById('account-modal-title').textContent = accountId ? 'Изменить счёт' : 'Новый счёт';
+      if (accountId) {
+        const account = appState.accounts.find(item => item.id === accountId);
+        if (!account) return;
+        document.getElementById('account-id').value = account.id;
+        document.getElementById('account-name').value = account.name;
+        document.getElementById('account-type').value = account.type;
+        document.getElementById('account-opening-balance').value = account.openingBalance;
+        document.getElementById('account-color').value = account.color;
+        document.getElementById('account-delete').classList.remove('hidden');
+      }
+      openModal('modal-account');
+    }
+
+    function saveAccount(event) {
+      event.preventDefault();
+      const id = document.getElementById('account-id').value;
+      const name = document.getElementById('account-name').value.trim();
+      const openingBalance = Number(document.getElementById('account-opening-balance').value);
+      if (!name || name.length > 48 || !Number.isFinite(openingBalance) || Math.abs(openingBalance) > 1e12) {
+        showInAppToast('Проверьте счёт', 'Укажите название и корректный начальный баланс.');
+        return;
+      }
+      const account = { id: id || createId('account'), name, type: document.getElementById('account-type').value, openingBalance, color: document.getElementById('account-color').value };
+      if (id) appState.accounts = appState.accounts.map(item => item.id === id ? account : item);
+      else appState.accounts.push(account);
+      saveStateToLocalStorage();
+      closeModal('modal-account');
+      renderProfileTab();
+      renderHomeAccounts();
+      renderDashboardTab();
+      renderTransactionsTab();
+    }
+
+    function deleteEditingAccount() {
+      const id = document.getElementById('account-id').value;
+      if (!id) return;
+      if (appState.accounts.length <= 1) {
+        showInAppToast('Нужен хотя бы один счёт', 'Сначала добавьте другой счёт.');
+        return;
+      }
+      const isUsed = appState.transactions.some(tx => tx.accountId === id || tx.fromAccountId === id || tx.toAccountId === id) || appState.recurring.some(rule => rule.accountId === id);
+      if (isUsed) {
+        showInAppToast('Счёт используется', 'Перенесите или удалите связанные операции и повторения перед удалением счёта.');
+        return;
+      }
+      if (!confirm('Удалить этот счёт?')) return;
+      appState.accounts = appState.accounts.filter(account => account.id !== id);
+      saveStateToLocalStorage();
+      closeModal('modal-account');
+      renderProfileTab();
+      renderDashboardTab();
+      renderTransactionsTab();
+    }
+
+    function openGoalModal(goalId = '') {
+      document.getElementById('form-goal').reset();
+      document.getElementById('goal-id').value = '';
+      document.getElementById('goal-saved').value = '0';
+      document.getElementById('goal-modal-title').textContent = goalId ? 'Изменить цель' : 'Новая цель';
+      if (goalId) {
+        const goal = appState.goals.find(item => item.id === goalId);
+        if (!goal) return;
+        document.getElementById('goal-id').value = goal.id;
+        document.getElementById('goal-name').value = goal.name;
+        document.getElementById('goal-target').value = goal.targetAmount;
+        document.getElementById('goal-saved').value = goal.savedAmount;
+        document.getElementById('goal-deadline').value = goal.deadline || '';
+        document.getElementById('goal-kind').value = goal.kind;
+      }
+      openModal('modal-goal');
+    }
+
+    function saveGoal(event) {
+      event.preventDefault();
+      const id = document.getElementById('goal-id').value;
+      const goal = {
+        id: id || createId('goal'),
+        name: document.getElementById('goal-name').value.trim(),
+        targetAmount: Number(document.getElementById('goal-target').value),
+        savedAmount: Number(document.getElementById('goal-saved').value),
+        deadline: document.getElementById('goal-deadline').value || null,
+        kind: document.getElementById('goal-kind').value
+      };
+      if (!goal.name || goal.name.length > 64 || !Number.isFinite(goal.targetAmount) || goal.targetAmount <= 0 || !Number.isFinite(goal.savedAmount) || goal.savedAmount < 0) {
+        showInAppToast('Проверьте цель', 'Укажите название и корректные суммы.');
+        return;
+      }
+      if (id) appState.goals = appState.goals.map(item => item.id === id ? goal : item);
+      else appState.goals.push(goal);
+      saveStateToLocalStorage();
+      closeModal('modal-goal');
+      renderGoalsTab();
+      renderHomeGoal();
+    }
+
+    function contributeToGoal(goalId) {
+      const goal = appState.goals.find(item => item.id === goalId);
+      if (!goal) return;
+      const input = prompt(`Сколько добавить к цели «${goal.name}»?`);
+      if (input === null) return;
+      const amount = Number(input.replace(',', '.'));
+      if (!Number.isFinite(amount) || amount <= 0) {
+        showInAppToast('Некорректная сумма', 'Введите положительное число.');
+        return;
+      }
+      goal.savedAmount += amount;
+      saveStateToLocalStorage();
+      renderGoalsTab();
+      renderHomeGoal();
+    }
+
+    function deleteGoal(goalId) {
+      if (!confirm('Удалить эту финансовую цель?')) return;
+      appState.goals = appState.goals.filter(goal => goal.id !== goalId);
+      saveStateToLocalStorage();
+      renderGoalsTab();
+      renderHomeGoal();
+    }
+
+    function renderGoalsTab() {
+      const list = document.getElementById('goals-list');
+      const chart = document.getElementById('goal-savings-chart');
+      if (!list || !chart) return;
+      if (!appState.goals.length) list.innerHTML = '<div class="glass-card rounded-2xl p-5 text-center text-sm text-slate-400">Целей пока нет. Создайте первую и следите за прогрессом.</div>';
+      else list.innerHTML = appState.goals.map(goal => {
+        const pct = Math.min(100, Math.round(goal.savedAmount / goal.targetAmount * 100));
+        const left = Math.max(0, goal.targetAmount - goal.savedAmount);
+        return `<article class="glass-card rounded-2xl p-4 space-y-3"><div class="flex items-start justify-between gap-3"><div class="min-w-0"><span class="text-[10px] uppercase tracking-wider text-emerald-300">${goal.kind === 'emergency' ? 'Подушка безопасности' : 'Цель'}</span><h3 class="mt-1 text-sm font-bold text-white">${escapeHtml(goal.name)}</h3>${goal.deadline ? `<p class="mt-1 text-[10px] text-slate-500">Срок: ${formatDateRu(goal.deadline)}</p>` : ''}</div><span class="text-xs font-bold text-emerald-300">${pct}%</span></div><div class="h-2 rounded-full bg-slate-800 overflow-hidden"><div class="h-full rounded-full bg-emerald-400" style="width:${pct}%"></div></div><div class="flex justify-between text-[11px] text-slate-400"><span>${formatRub(goal.savedAmount)} накоплено</span><span>осталось ${formatRub(left)}</span></div><div class="flex gap-2"><button type="button" onclick="${inlineHandler('contributeToGoal', goal.id)}" class="flex-1 rounded-xl bg-emerald-500/15 py-2.5 text-xs font-bold text-emerald-300">＋ Взнос</button><button type="button" onclick="${inlineHandler('openGoalModal', goal.id)}" class="rounded-xl bg-slate-800 px-3 text-xs text-slate-300">Изменить</button><button type="button" onclick="${inlineHandler('deleteGoal', goal.id)}" aria-label="Удалить цель ${escapeHtml(goal.name)}" class="rounded-xl bg-slate-800 px-3 text-xs text-rose-300">Удалить</button></div></article>`;
+      }).join('');
+      chart.innerHTML = `<h3 class="text-xs font-bold text-white">Накопления по целям</h3><p class="mt-1 text-[10px] text-slate-500">Распределение уже отложенных сумм, без изменения баланса счетов.</p><div class="mt-3 space-y-3">${appState.goals.map(goal => { const pct = Math.min(100, goal.savedAmount / goal.targetAmount * 100); return `<div><div class="mb-1 flex justify-between gap-2 text-[10px] text-slate-400"><span class="truncate">${escapeHtml(goal.name)}</span><span>${formatRub(goal.savedAmount)}</span></div><div class="h-1.5 rounded-full bg-slate-800"><div class="h-full rounded-full bg-emerald-400" style="width:${pct}%"></div></div></div>`; }).join('') || '<p class="text-xs text-slate-500">Добавьте цель, чтобы увидеть прогресс.</p>'}</div>`;
+    }
+
+    function renderProfileTab() {
+      const accounts = document.getElementById('profile-accounts');
+      if (!accounts) return;
+      const balances = getAccountBalances();
+      accounts.innerHTML = appState.accounts.map(account => `<div class="flex items-center gap-3 rounded-xl border border-slate-800 bg-slate-950/70 p-3"><span class="h-9 w-1.5 rounded-full" style="background:${account.color}"></span><div class="min-w-0 flex-1"><p class="truncate text-xs font-bold text-white">${escapeHtml(account.name)}</p><p class="text-[10px] text-slate-500">${getAccountTypeLabel(account.type)}</p></div><strong class="text-xs text-slate-200">${formatRub(balances[account.id] || 0)}</strong><button type="button" onclick="${inlineHandler('openAccountModal', account.id)}" aria-label="Изменить счёт ${escapeHtml(account.name)}" class="rounded-lg px-2 py-2 text-xs text-blue-300">Изм.</button></div>`).join('');
+      const subCount = document.getElementById('profile-sub-count');
+      if (subCount) subCount.textContent = `${appState.subscriptions.filter(item => item.active).length} активных`;
+      const recurringCount = document.getElementById('recurring-count');
+      const recurringList = document.getElementById('recurring-list');
+      if (recurringCount) recurringCount.textContent = String(appState.recurring.length);
+      if (recurringList) recurringList.innerHTML = appState.recurring.length ? appState.recurring.map(rule => {
+        const cat = CATEGORIES[rule.category] || { name: rule.category };
+        return `<div class="flex items-center justify-between gap-2 rounded-xl bg-slate-950 p-3"><div class="min-w-0"><p class="truncate text-xs font-semibold text-white">${escapeHtml(rule.note || cat.name)}</p><p class="text-[10px] text-slate-500">${rule.cycle === 'weekly' ? 'Еженедельно' : rule.cycle === 'monthly' ? 'Ежемесячно' : 'Ежегодно'} · ${formatDateRu(rule.nextDate)} · ${formatRub(rule.amount)}</p></div><button type="button" onclick="${inlineHandler('toggleRecurring', rule.id)}" class="text-xs ${rule.enabled ? 'text-amber-300' : 'text-emerald-300'}">${rule.enabled ? 'Пауза' : 'Возобновить'}</button><button type="button" onclick="${inlineHandler('deleteRecurring', rule.id)}" class="text-xs text-rose-300">Удалить</button></div>`;
+      }).join('') : '<p class="text-xs text-slate-500">Повторяющихся операций пока нет.</p>';
+      const hideButton = document.getElementById('profile-hide-balance');
+      if (hideButton) hideButton.textContent = appState.privacy.hideBalances ? 'Показать балансы' : 'Скрыть балансы';
+      const removePin = document.getElementById('btn-remove-pin');
+      if (removePin) removePin.classList.toggle('hidden', !appState.privacy.pinHash);
+    }
+
+    function toggleBalanceVisibility() {
+      setHideBalances(!appState.privacy.hideBalances);
+    }
+
+    function toggleRecurring(ruleId) {
+      const rule = appState.recurring.find(item => item.id === ruleId);
+      if (!rule) return;
+      rule.enabled = !rule.enabled;
+      saveStateToLocalStorage();
+      renderProfileTab();
+    }
+
+    function deleteRecurring(ruleId) {
+      if (!confirm('Удалить это расписание повторения? Уже созданные операции сохранятся.')) return;
+      appState.recurring = appState.recurring.filter(rule => rule.id !== ruleId);
+      saveStateToLocalStorage();
+      renderProfileTab();
+    }
+
+    function savePaydayPreference(value) {
+      const payday = Number(value);
+      if (!Number.isInteger(payday) || payday < 1 || payday > 31) {
+        showInAppToast('Проверьте день зарплаты', 'Введите число от 1 до 31.');
+        document.getElementById('settings-payday').value = appState.settings.payday;
+        return;
+      }
+      appState.settings.payday = payday;
+      saveStateToLocalStorage();
+      renderDashboardTab();
+    }
+
+    function toHex(buffer) { return Array.from(new Uint8Array(buffer), byte => byte.toString(16).padStart(2, '0')).join(''); }
+    async function hashPin(pin, saltHex) {
+      if (!window.crypto?.subtle) throw new Error('Для PIN требуется защищённый контекст HTTPS.');
+      const salt = Uint8Array.from(saltHex.match(/.{2}/g), byte => parseInt(byte, 16));
+      const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(pin), 'PBKDF2', false, ['deriveBits']);
+      return toHex(await crypto.subtle.deriveBits({ name: 'PBKDF2', salt, iterations: 120000, hash: 'SHA-256' }, key, 256));
+    }
+
+    async function saveAppPin() {
+      const pin = document.getElementById('settings-pin').value;
+      if (!/^\d{4,8}$/.test(pin)) {
+        showInAppToast('Нужен PIN из 4–8 цифр', 'Используйте только цифры.');
+        return;
+      }
+      try {
+        const saltBytes = crypto.getRandomValues(new Uint8Array(16));
+        const salt = toHex(saltBytes);
+        const hash = await hashPin(pin, salt);
+        appState.privacy.pinSalt = salt;
+        appState.privacy.pinHash = hash;
+        saveStateToLocalStorage();
+        document.getElementById('settings-pin').value = '';
+        renderProfileTab();
+        showInAppToast('PIN-код сохранён', 'Экран можно заблокировать из профиля.');
+      } catch (error) {
+        showInAppToast('Не удалось сохранить PIN', error.message || 'Проверьте поддержку шифрования браузером.');
+      }
+    }
+
+    function removeAppPin() {
+      if (!confirm('Удалить PIN-код блокировки?')) return;
+      appState.privacy.pinSalt = null;
+      appState.privacy.pinHash = null;
+      saveStateToLocalStorage();
+      renderProfileTab();
+      showInAppToast('PIN-код удалён', 'Блокировка приложения отключена.');
+    }
+
+    function lockAppNow() {
+      if (!appState.privacy.pinHash) {
+        showInAppToast('PIN-код не настроен', 'Добавьте его в Настройки → Приватность.');
+        openModal('modal-settings');
+        return;
+      }
+      const screen = document.getElementById('app-lock-screen');
+      screen.classList.remove('hidden');
+      screen.classList.add('flex');
+      screen.setAttribute('aria-hidden', 'false');
+      document.getElementById('unlock-pin').value = '';
+      document.getElementById('unlock-error').classList.add('hidden');
+      setTimeout(() => document.getElementById('unlock-pin').focus(), 0);
+    }
+
+    async function unlockApp(event) {
+      event.preventDefault();
+      try {
+        const hash = await hashPin(document.getElementById('unlock-pin').value, appState.privacy.pinSalt);
+        let difference = 0;
+        for (let i = 0; i < hash.length; i++) difference |= hash.charCodeAt(i) ^ appState.privacy.pinHash.charCodeAt(i);
+        if (difference !== 0) throw new Error('wrong PIN');
+        const screen = document.getElementById('app-lock-screen');
+        screen.classList.add('hidden');
+        screen.classList.remove('flex');
+        screen.setAttribute('aria-hidden', 'true');
+      } catch {
+        document.getElementById('unlock-error').classList.remove('hidden');
+        document.getElementById('unlock-pin').select();
+      }
     }
 
     function closeModal(modalId) {
@@ -1312,23 +1776,27 @@
     });
 
     function setTxType(type) {
+      if (!['expense', 'income', 'transfer'].includes(type)) type = 'expense';
       appState.activeTxModalType = type;
-      const btnExp = document.getElementById('tx-type-btn-expense');
-      const btnInc = document.getElementById('tx-type-btn-income');
-
-      if (type === 'expense') {
-        btnExp.className = 'py-2 rounded-xl text-xs font-bold bg-rose-600 text-white transition';
-        btnInc.className = 'py-2 rounded-xl text-xs font-bold text-slate-400 hover:text-white transition';
-        btnExp.setAttribute('aria-pressed', 'true');
-        btnInc.setAttribute('aria-pressed', 'false');
+      const activeClasses = { expense: 'bg-rose-600', income: 'bg-emerald-600', transfer: 'bg-sky-600' };
+      ['expense', 'income', 'transfer'].forEach(buttonType => {
+        const button = document.getElementById(`tx-type-btn-${buttonType}`);
+        const active = buttonType === type;
+        button.className = `py-2 rounded-xl text-xs font-bold ${active ? `${activeClasses[buttonType]} text-white` : 'text-slate-400 hover:text-white'} transition`;
+        button.setAttribute('aria-pressed', String(active));
+      });
+      renderAccountSelectors();
+      const transfer = type === 'transfer';
+      document.getElementById('tx-transfer-fields').classList.toggle('hidden', !transfer);
+      document.getElementById('tx-normal-fields').classList.toggle('hidden', transfer);
+      document.getElementById('tx-category').required = !transfer;
+      if (transfer) {
+        const source = document.getElementById('tx-account-source');
+        const target = document.getElementById('tx-account-target');
+        if (appState.accounts.length > 1 && source.value === target.value) target.value = appState.accounts[1].id;
       } else {
-        btnExp.className = 'py-2 rounded-xl text-xs font-bold text-slate-400 hover:text-white transition';
-        btnInc.className = 'py-2 rounded-xl text-xs font-bold bg-emerald-600 text-white transition';
-        btnExp.setAttribute('aria-pressed', 'false');
-        btnInc.setAttribute('aria-pressed', 'true');
+        renderCategoryGrid(type);
       }
-
-      renderCategoryGrid(type);
     }
 
     function renderCategoryGrid(type) {
@@ -1377,37 +1845,55 @@
     function saveTransaction(e) {
       e.preventDefault();
       const amount = parseFloat(document.getElementById('tx-amount').value);
-      const category = document.getElementById('tx-category').value;
+      const type = appState.activeTxModalType;
+      const category = type === 'transfer' ? 'transfer' : document.getElementById('tx-category').value;
       const date = document.getElementById('tx-date').value;
       const note = document.getElementById('tx-note').value.trim();
       const editId = document.getElementById('tx-id').value;
 
-      if (!Number.isFinite(amount) || amount <= 0 || !category || !date || Number.isNaN(parseDateOnly(date).getTime())) {
+      if (!Number.isFinite(amount) || amount <= 0 || (type !== 'transfer' && !category) || !date || Number.isNaN(parseDateOnly(date).getTime())) {
         showInAppToast('Проверьте операцию', 'Укажите положительную сумму, категорию и корректную дату.');
         return;
       }
 
-      if (editId) {
-        const tx = appState.transactions.find(t => t.id === editId);
-        if (tx) {
-          tx.type = appState.activeTxModalType;
-          tx.amount = amount;
-          tx.category = category;
-          tx.date = date;
-          tx.note = note;
+      const tx = editId ? appState.transactions.find(item => item.id === editId) : null;
+      if (type === 'transfer') {
+        const fromAccountId = document.getElementById('tx-account-source').value;
+        const toAccountId = document.getElementById('tx-account-target').value;
+        if (appState.accounts.length < 2 || !fromAccountId || !toAccountId || fromAccountId === toAccountId) {
+          showInAppToast('Нужны два разных счёта', 'Создайте второй счёт или выберите другой счёт-получатель.');
+          return;
         }
+        const transfer = { id: editId || createId('tx'), type, amount, category, date, note, fromAccountId, toAccountId };
+        if (tx) Object.assign(tx, transfer);
+        else appState.transactions.unshift(transfer);
       } else {
-        appState.transactions.unshift({
-          id: createId('tx'),
-          type: appState.activeTxModalType,
-          amount,
-          category,
-          date,
-          note
-        });
+        const accountId = document.getElementById('tx-account').value;
+        if (!accountId) {
+          showInAppToast('Добавьте счёт', 'Для операции нужен хотя бы один действующий счёт.');
+          return;
+        }
+        const repeat = document.getElementById('tx-repeat').value;
+        const transaction = { id: editId || createId('tx'), type, amount, category, date, note, accountId, recurringId: tx?.recurringId || null };
+        if (tx) Object.assign(tx, transaction);
+        else {
+          if (repeat !== 'none') {
+            const recurringId = createId('repeat');
+            const dateValue = parseDateOnly(date);
+            const rule = {
+              id: recurringId, type, amount, category, accountId, note, cycle: repeat,
+              anchorDay: dateValue.getDate(), anchorMonth: dateValue.getMonth(),
+              nextDate: advanceRecurringDate(date, repeat, dateValue.getDate(), dateValue.getMonth()), enabled: true
+            };
+            appState.recurring.push(rule);
+            transaction.recurringId = recurringId;
+          }
+          appState.transactions.unshift(transaction);
+        }
       }
 
       saveStateToLocalStorage();
+      renderAccountSelectors();
       closeModal('modal-add-tx');
       switchTab(appState.currentTab);
     }
@@ -1417,14 +1903,23 @@
       if (!tx) return;
 
       openModal('modal-add-tx', tx.type, false);
+      setTxType(tx.type);
       document.getElementById('tx-id').value = tx.id;
       document.getElementById('tx-modal-title').textContent = 'Редактировать операцию';
       document.getElementById('tx-delete-btn').classList.remove('hidden');
       document.getElementById('tx-amount').value = tx.amount;
       document.getElementById('tx-date').value = tx.date;
       document.getElementById('tx-note').value = tx.note || '';
-      renderCategoryGrid(tx.type);
-      selectCategoryTile(tx.category);
+      document.getElementById('tx-repeat-field').classList.add('hidden');
+      renderAccountSelectors();
+      if (tx.type === 'transfer') {
+        document.getElementById('tx-account-source').value = tx.fromAccountId;
+        document.getElementById('tx-account-target').value = tx.toAccountId;
+      } else {
+        document.getElementById('tx-account').value = tx.accountId;
+        renderCategoryGrid(tx.type);
+        selectCategoryTile(tx.category);
+      }
     }
 
     function deleteEditingTransaction() {
@@ -1632,9 +2127,9 @@
     }
 
     function deleteCategory(id) {
-      const used = appState.transactions.some(t => t.category === id) || appState.subscriptions.some(s => s.category === id);
+      const used = appState.transactions.some(t => t.category === id) || appState.subscriptions.some(s => s.category === id) || appState.recurring.some(rule => rule.category === id);
       if (used) {
-        alert('Эта категория уже используется в операциях или подписках. Сначала измените их категорию.');
+        alert('Эта категория используется в операциях, подписках или повторениях. Сначала измените связанные записи.');
         return;
       }
       if (!confirm('Удалить пользовательскую категорию?')) return;
@@ -1816,10 +2311,13 @@
     // =========================================================================
     window.onload = function() {
       loadStateFromLocalStorage();
+      materializeRecurringOperations();
       applyUserPreferences();
+      renderAccountSelectors();
       updateRecoveryBackupUI();
       initServiceWorker();
       switchTab('dashboard');
+      if (appState.privacy.pinHash) lockAppNow();
 
       // Automatically check for subscription reminders on load
       setTimeout(() => {

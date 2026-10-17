@@ -18,7 +18,7 @@
 
   const BUILT_IN_CATEGORY_IDS = new Set([
     'food', 'restaurants', 'transport', 'housing', 'entertainment', 'health',
-    'shopping', 'telecom', 'subscriptions', 'education', 'salary', 'freelance',
+    'shopping', 'telecom', 'subscriptions', 'education', 'salary', 'freelance', 'transfer',
     'investments', 'gifts'
   ]);
   const ICON_KEYS = new Set([
@@ -35,7 +35,11 @@
     ['#06B6D4', 'rgba(6,182,212,.15)'],
     ['#84CC16', 'rgba(132,204,22,.15)']
   ];
-  const VALID_TABS = new Set(['dashboard', 'transactions', 'subscriptions', 'analytics', 'forecast', 'debts']);
+  const DEFAULT_ACCOUNTS = Object.freeze([
+    { id: 'account-main', name: 'Основной счёт', type: 'checking', openingBalance: 0, color: '#3B82F6' }
+  ]);
+  const ACCOUNT_COLORS = Object.freeze(COLOR_PALETTE.map(pair => pair[0]));
+  const VALID_TABS = new Set(['dashboard', 'transactions', 'subscriptions', 'analytics', 'forecast', 'debts', 'goals', 'profile']);
   const SAFE_ID = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}$/;
   const FORBIDDEN_IDS = new Set(['constructor', 'prototype', 'toString', 'valueOf', '__proto__']);
   const MAX_RECORDS = 10000;
@@ -96,6 +100,41 @@
     return `${year}-${month}-${day}`;
   }
 
+  function advanceRecurringDate(dateString, cycle, anchorDay, anchorMonth) {
+    const date = parseDateOnly(dateString);
+    if (Number.isNaN(date.getTime())) throw new Error('Некорректная дата повтора');
+    if (cycle === 'weekly') {
+      date.setDate(date.getDate() + 7);
+      return formatDateOnly(date);
+    }
+    if (cycle === 'monthly') {
+      const nextMonth = new Date(date.getFullYear(), date.getMonth() + 1, 1);
+      const day = Math.min(anchorDay || date.getDate(), new Date(nextMonth.getFullYear(), nextMonth.getMonth() + 1, 0).getDate());
+      return formatDateOnly(new Date(nextMonth.getFullYear(), nextMonth.getMonth(), day));
+    }
+    if (cycle === 'yearly') {
+      const month = Number.isInteger(anchorMonth) ? anchorMonth : date.getMonth();
+      const year = date.getFullYear() + 1;
+      const day = Math.min(anchorDay || date.getDate(), new Date(year, month + 1, 0).getDate());
+      return formatDateOnly(new Date(year, month, day));
+    }
+    throw new Error('Некорректный период повтора');
+  }
+
+  function calculateAccountBalances(accounts, transactions) {
+    const balances = Object.fromEntries((Array.isArray(accounts) ? accounts : []).map(account => [account.id, Number(account.openingBalance) || 0]));
+    (Array.isArray(transactions) ? transactions : []).forEach(transaction => {
+      const amount = Number(transaction.amount) || 0;
+      if (transaction.type === 'income' && Object.prototype.hasOwnProperty.call(balances, transaction.accountId)) balances[transaction.accountId] += amount;
+      if (transaction.type === 'expense' && Object.prototype.hasOwnProperty.call(balances, transaction.accountId)) balances[transaction.accountId] -= amount;
+      if (transaction.type === 'transfer') {
+        if (Object.prototype.hasOwnProperty.call(balances, transaction.fromAccountId)) balances[transaction.fromAccountId] -= amount;
+        if (Object.prototype.hasOwnProperty.call(balances, transaction.toAccountId)) balances[transaction.toAccountId] += amount;
+      }
+    });
+    return balances;
+  }
+
   function formatCurrency(amount, currency = 'RUB', locale = 'ru-RU') {
     const safeCurrency = ['RUB', 'USD', 'EUR', 'PLN'].includes(currency) ? currency : 'RUB';
     return new Intl.NumberFormat(locale, {
@@ -144,14 +183,86 @@
     const state = rawState.format === 'finflow-backup' ? rawState.state : rawState;
     if (!isRecord(state)) throw new Error('Файл не содержит данных FinFlow');
 
-    const transactions = normalizeRecords(state.transactions, 'Операции', record => ({
-      id: requireId(record.id, 'Операция'),
-      type: ['income', 'expense'].includes(record.type) ? record.type : (() => { throw new Error('Операция: некорректный тип'); })(),
-      amount: requireAmount(record.amount, 'Операция'),
-      category: requireId(record.category, 'Категория операции'),
-      date: requireDateOnly(record.date, 'Операция'),
-      note: requireText(record.note ?? '', 'Комментарий операции', 500, true)
-    }));
+    let accounts = normalizeRecords(state.accounts, 'Счета', record => {
+      const type = ['checking', 'card', 'cash', 'savings'].includes(record.type) ? record.type : 'checking';
+      const openingBalance = record.openingBalance === undefined ? 0 : record.openingBalance;
+      if (typeof openingBalance !== 'number' || !Number.isFinite(openingBalance) || Math.abs(openingBalance) > MAX_AMOUNT) {
+        throw new Error('Счёт: некорректный начальный баланс');
+      }
+      return {
+        id: requireId(record.id, 'Счёт'),
+        name: requireText(record.name, 'Счёт', 48),
+        type,
+        openingBalance,
+        color: COLOR_PALETTE.some(pair => pair[0] === record.color) ? record.color : COLOR_PALETTE[0][0]
+      };
+    });
+    if (!accounts.length) accounts = DEFAULT_ACCOUNTS.map(account => ({ ...account }));
+    const accountIds = new Set(accounts.map(account => account.id));
+
+    const transactions = normalizeRecords(state.transactions, 'Операции', record => {
+      const type = ['income', 'expense', 'transfer'].includes(record.type) ? record.type : (() => { throw new Error('Операция: некорректный тип'); })();
+      const common = {
+        id: requireId(record.id, 'Операция'),
+        type,
+        amount: requireAmount(record.amount, 'Операция'),
+        date: requireDateOnly(record.date, 'Операция'),
+        note: requireText(record.note ?? '', 'Комментарий операции', 500, true)
+      };
+      if (type === 'transfer') {
+        const fromAccountId = requireId(record.fromAccountId, 'Счёт отправления');
+        const toAccountId = requireId(record.toAccountId, 'Счёт получения');
+        if (fromAccountId === toAccountId || !accountIds.has(fromAccountId) || !accountIds.has(toAccountId)) {
+          throw new Error('Перевод: выберите два разных существующих счёта');
+        }
+        return { ...common, category: 'transfer', fromAccountId, toAccountId };
+      }
+      const accountId = record.accountId === undefined ? accounts[0].id : requireId(record.accountId, 'Счёт операции');
+      if (!accountIds.has(accountId)) throw new Error('Операция: указанный счёт не найден');
+      const recurringId = record.recurringId ? requireId(record.recurringId, 'Повтор операции') : null;
+      return {
+        ...common,
+        accountId,
+        category: requireId(record.category, 'Категория операции'),
+        recurringId
+      };
+    });
+
+    const recurring = normalizeRecords(state.recurring, 'Повторяющиеся операции', record => {
+      if (!['income', 'expense'].includes(record.type)) throw new Error('Повторяющаяся операция: некорректный тип');
+      if (!['weekly', 'monthly', 'yearly'].includes(record.cycle)) throw new Error('Повторяющаяся операция: некорректный период');
+      const accountId = requireId(record.accountId || accounts[0].id, 'Счёт повторяющейся операции');
+      if (!accountIds.has(accountId)) throw new Error('Повторяющаяся операция: счёт не найден');
+      if (record.enabled !== undefined && typeof record.enabled !== 'boolean') throw new Error('Повторяющаяся операция: некорректный статус');
+      return {
+        id: requireId(record.id, 'Повторяющаяся операция'),
+        type: record.type,
+        amount: requireAmount(record.amount, 'Повторяющаяся операция'),
+        category: requireId(record.category, 'Категория повторяющейся операции'),
+        accountId,
+        note: requireText(record.note ?? '', 'Комментарий повторяющейся операции', 500, true),
+        cycle: record.cycle,
+        nextDate: requireDateOnly(record.nextDate, 'Дата повторяющейся операции'),
+        anchorDay: Number.isInteger(record.anchorDay) && record.anchorDay >= 1 && record.anchorDay <= 31
+          ? record.anchorDay : parseDateOnly(record.nextDate).getDate(),
+        anchorMonth: Number.isInteger(record.anchorMonth) && record.anchorMonth >= 0 && record.anchorMonth <= 11
+          ? record.anchorMonth : parseDateOnly(record.nextDate).getMonth(),
+        enabled: record.enabled !== false
+      };
+    });
+
+    const goals = normalizeRecords(state.goals, 'Цели', record => {
+      const deadline = record.deadline || null;
+      const savedAmount = record.savedAmount === undefined ? 0 : record.savedAmount;
+      return {
+        id: requireId(record.id, 'Цель'),
+        name: requireText(record.name, 'Цель', 64),
+        targetAmount: requireAmount(record.targetAmount, 'Цель'),
+        savedAmount: requireAmount(savedAmount, 'Накоплено по цели', true),
+        deadline: deadline === null ? null : requireDateOnly(deadline, 'Срок цели'),
+        kind: record.kind === 'emergency' ? 'emergency' : 'goal'
+      };
+    });
 
     const subscriptions = normalizeRecords(state.subscriptions, 'Подписки', record => {
       const payday = Number(record.payday);
@@ -213,21 +324,36 @@
     const settingsSource = isRecord(state.settings) ? state.settings : {};
     const settings = {
       currency: ['RUB', 'USD', 'EUR', 'PLN'].includes(settingsSource.currency) ? settingsSource.currency : 'RUB',
-      accent: ['blue', 'violet', 'emerald', 'rose'].includes(settingsSource.accent) ? settingsSource.accent : 'blue'
+      accent: ['blue', 'violet', 'emerald', 'rose'].includes(settingsSource.accent) ? settingsSource.accent : 'blue',
+      payday: Number.isInteger(settingsSource.payday) && settingsSource.payday >= 1 && settingsSource.payday <= 31 ? settingsSource.payday : 10
     };
+    const privacySource = isRecord(state.privacy) ? state.privacy : {};
+    const privacy = {
+      hideBalances: privacySource.hideBalances === true,
+      pinSalt: typeof privacySource.pinSalt === 'string' && /^[a-f0-9]{32}$/i.test(privacySource.pinSalt) ? privacySource.pinSalt : null,
+      pinHash: typeof privacySource.pinHash === 'string' && /^[a-f0-9]{64}$/i.test(privacySource.pinHash) ? privacySource.pinHash : null
+    };
+    if (!privacy.pinSalt || !privacy.pinHash) {
+      privacy.pinSalt = null;
+      privacy.pinHash = null;
+    }
 
     return {
       transactions,
+      accounts,
+      goals,
+      recurring,
       subscriptions,
       debts,
       categories,
       budgets,
       currentTab: VALID_TABS.has(state.currentTab) ? state.currentTab : 'dashboard',
-      txFilterType: ['all', 'expense', 'income'].includes(state.txFilterType) ? state.txFilterType : 'all',
+      txFilterType: ['all', 'expense', 'income', 'transfer'].includes(state.txFilterType) ? state.txFilterType : 'all',
       activeTxModalType: state.activeTxModalType === 'income' ? 'income' : 'expense',
       lastNotifiedTimestamp,
       notificationsMode,
       settings,
+      privacy,
       debtFilter: ['all', 'owed_to_me', 'i_owe'].includes(state.debtFilter) ? state.debtFilter : 'all'
     };
   }
@@ -250,11 +376,14 @@
   }
 
   function serializeBackup(state, exportedAt = new Date().toISOString()) {
+    const safeState = normalizeAppState(state);
+    safeState.privacy.pinHash = null;
+    safeState.privacy.pinSalt = null;
     return JSON.stringify({
       format: 'finflow-backup',
       version: 1,
       exportedAt,
-      state: normalizeAppState(state)
+      state: safeState
     }, null, 2);
   }
 
@@ -270,7 +399,7 @@
     const header = ['Дата', 'Тип', 'Категория', 'Описание', `Сумма (${currencyCode})`];
     const rows = (Array.isArray(transactions) ? transactions : []).map(transaction => [
       transaction.date,
-      transaction.type === 'income' ? 'Доход' : 'Расход',
+      transaction.type === 'income' ? 'Доход' : transaction.type === 'transfer' ? 'Перевод' : 'Расход',
       categoryMap[transaction.category]?.name || transaction.category,
       transaction.note || '',
       transaction.amount
@@ -287,8 +416,12 @@
   }
 
   return {
+    ACCOUNT_COLORS,
     DEFAULT_BUDGETS,
+    DEFAULT_ACCOUNTS,
     MAX_BACKUP_BYTES,
+    advanceRecurringDate,
+    calculateAccountBalances,
     createId,
     currencySymbol,
     escapeHtml,
